@@ -49,30 +49,73 @@ static int valid_path_char(char ch)
 	}
 }
 
-static const char *path_encode(const char *path)
+static char index_for_ch(char ch)
 {
-	static char temp[FILENAME_MAX];
-	int i, pos = 0;
+	int i;
+	for (i = 0; i < (int)((sizeof("0123456789ABCDEF") - 1u)); ++i) {
+		if (ch == "0123456789ABCDEF"[i])
+			return (char)i;
+	}
+	return (char)i;
+}
+
+const char *sync_path_encode(const char *path, char *tgt, size_t tgtSizeInChars)
+{
+	int i;
+	size_t pos = 0u;
 	int path_len = (int)strlen(path);
 	for (i = 0; i < path_len; ++i) {
 		int ch = path[i];
 		if (valid_path_char(ch)) {
-			if (pos >= sizeof(temp) - 1)
+			if (pos >= (tgtSizeInChars - 1u))
 				break;
 
-			temp[pos++] = (char)ch;
-		} else {
-			if (pos >= sizeof(temp) - 3)
+			tgt[pos++] = (char)ch;
+		}
+		else {
+			if (pos >= (tgtSizeInChars - 3u))
 				break;
 
-			temp[pos++] = '-';
-			temp[pos++] = "0123456789ABCDEF"[(ch >> 4) & 0xF];
-			temp[pos++] = "0123456789ABCDEF"[ch & 0xF];
+			tgt[pos++] = '-';
+			tgt[pos++] = "0123456789ABCDEF"[(ch >> 4) & 0xF];
+			tgt[pos++] = "0123456789ABCDEF"[ch & 0xF];
 		}
 	}
 
-	temp[pos] = '\0';
-	return temp;
+	tgt[pos] = '\0';
+	return tgt;
+}
+
+const char *sync_path_decode(const char *path, char *tgt, size_t tgtSizeInChars)
+{
+	size_t len = strlen(path);
+	size_t i = 0u;
+	size_t pos = 0u;
+	if (len >= tgtSizeInChars)
+		len = tgtSizeInChars - 1u;
+	while (i < len) {
+		char ch = path[i];
+		if (('-' == ch) && (i < (len - 2u))) {
+			char upper = index_for_ch(path[i + 1u]);
+			char lower = index_for_ch(path[i + 2u]);
+			char finalCh = (upper << 4) | lower;
+			if (0 == valid_path_char(finalCh)) {
+				tgt[pos++] = finalCh;
+				i += 3u;
+				continue;
+			}
+		}
+		tgt[pos++] = ch;
+		++i;
+	}
+	tgt[pos] = '\0';
+	return tgt;
+}
+
+static const char *path_encode(const char *path)
+{
+	static char temp[FILENAME_MAX];
+	return sync_path_encode(path, temp, sizeof(temp));
 }
 
 static const char *sync_track_path(const char *base, const char *name)
