@@ -8,7 +8,9 @@
 
 /* configure socket-stack */
 #ifdef _WIN32
- #define WIN32_LEAN_AND_MEAN
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
  #define USE_GETADDRINFO
  #ifndef NOMINMAX
   #define NOMINMAX
