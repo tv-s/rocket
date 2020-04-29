@@ -8,7 +8,7 @@
 
 #include <sys/stat.h>
 
-#if defined(WIN32) || defined(_XBOX)
+#if defined(WIN32) || defined(WIN64) || defined(_XBOX)
  #include <direct.h>
  #define S_ISDIR(m) (((m)& S_IFMT) == S_IFDIR)
  #define mkdir(pathname, mode) _mkdir(pathname)
