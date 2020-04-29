@@ -7,7 +7,10 @@
 #ifndef SYNC_PLAYER
 
 /* configure socket-stack */
-#ifdef _WIN32
+#ifdef _XBOX
+ #include <XTL.h>
+ #include <winsockx.h>
+#elif defined(_WIN32)
  #ifndef WIN32_LEAN_AND_MEAN
   #define WIN32_LEAN_AND_MEAN
  #endif

@@ -8,7 +8,7 @@
 
 #include <sys/stat.h>
 
-#ifdef WIN32
+#if defined(WIN32) || defined(_XBOX)
  #include <direct.h>
  #define S_ISDIR(m) (((m)& S_IFMT) == S_IFDIR)
  #define mkdir(pathname, mode) _mkdir(pathname)
@@ -16,6 +16,10 @@
  #include <network.h>
 #endif
 
+#ifdef _XBOX
+#define strdup _strdup
+#define stat _stat
+#endif
 static int find_track(struct sync_device *d, const char *name)
 {
 	int i;
@@ -31,10 +35,17 @@ static int valid_path_char(char ch)
 	case '.':
 	case '_':
 	case '/':
+#if defined(WIN32) || defined(_XBOX)
+	case '\\':
+#endif
 		return 1;
 
 	default:
+#ifdef _XBOX
+		return isalnum(((int)ch));
+#else
 		return isalnum(ch);
+#endif
 	}
 }
 
@@ -120,7 +131,7 @@ static inline int socket_poll(SOCKET socket)
 
 static inline int xsend(SOCKET s, const void *buf, size_t len, int flags)
 {
-#ifdef WIN32
+#if defined(WIN32) || defined(_XBOX)
 	assert(len <= INT_MAX);
 	return send(s, (const char *)buf, (int)len, flags) != (int)len;
 #else
@@ -130,7 +141,7 @@ static inline int xsend(SOCKET s, const void *buf, size_t len, int flags)
 
 static inline int xrecv(SOCKET s, void *buf, size_t len, int flags)
 {
-#ifdef WIN32
+#if defined(WIN32) || defined(_XBOX)
 	assert(len <= INT_MAX);
 	return recv(s, (char *)buf, (int)len, flags) != (int)len;
 #else
@@ -144,21 +155,48 @@ static struct Library *socket_base = NULL;
 
 static SOCKET server_connect(const char *host, unsigned short nport)
 {
+	int res;
+	int protocol = 0;
 	SOCKET sock = INVALID_SOCKET;
 #ifdef USE_GETADDRINFO
 	struct addrinfo *addr, *curr;
 	char port[6];
+#elif defined(_XBOX)
+	int i;
+	const int family = AF_INET;
+	const int sa_len = (int)sizeof(struct sockaddr);
+	struct sockaddr_in addr;
+	struct sockaddr *sa = (struct sockaddr*)&addr;
+	protocol = IPPROTO_TCP;
+	memset(&addr, 0, sizeof(struct sockaddr_in));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = inet_addr(host);
+	addr.sin_port = htons(nport);
 #else
 	struct hostent *he;
 	char **ap;
 #endif
 
-#ifdef WIN32
+#if defined(WIN32) || defined(_XBOX)
 	static int need_init = 1;
 	if (need_init) {
-		WSADATA wsa;
-		if (WSAStartup(MAKEWORD(2, 0), &wsa))
+#ifdef _XBOX
+		XNetStartupParams params;
+		// start xbox net
+		// move this to the engine side if net is needed for other things
+		memset(&params, 0, sizeof(XNetStartupParams));
+		params.cfgSizeOfStruct = sizeof(XNetStartupParams);
+		params.cfgFlags = XNET_STARTUP_BYPASS_SECURITY;
+		if (XNetStartup(&params) != NO_ERROR) {
+			fprintf(stderr, "rocket: XNetStartup() failed\n");
 			return INVALID_SOCKET;
+		}
+#endif
+		WSADATA wsa;
+		if (WSAStartup(MAKEWORD(2, 0), &wsa)) {
+			fprintf(stderr, "rocket: WSAStartup() failed\n");
+			return INVALID_SOCKET;
+		}
 		need_init = 0;
 	}
 #elif defined(USE_AMITCP)
@@ -179,7 +217,8 @@ static SOCKET server_connect(const char *host, unsigned short nport)
 		int family = curr->ai_family;
 		struct sockaddr *sa = curr->ai_addr;
 		int sa_len = (int)curr->ai_addrlen;
-
+#elif defined(_XBOX)
+	for (i = 0; i < 1; ++i) {
 #else
 
 	he = gethostbyname(host);
@@ -198,16 +237,17 @@ static SOCKET server_connect(const char *host, unsigned short nport)
 		memset(&sin.sin_zero, 0, sizeof(sin.sin_zero));
 
 #endif
-
-		sock = socket(family, SOCK_STREAM, 0);
-		if (sock == INVALID_SOCKET)
+		sock = socket(family, SOCK_STREAM, protocol);
+		if (sock == INVALID_SOCKET) {
+			fprintf(stderr, "rocket: socket() failed\n");
 			continue;
-
-		if (connect(sock, sa, sa_len) >= 0) {
+		}
+		res = connect(sock, sa, sa_len);
+		if (res >= 0) {
 			char greet[128];
 
 			if (xsend(sock, CLIENT_GREET, strlen(CLIENT_GREET), 0) ||
-			    xrecv(sock, greet, strlen(SERVER_GREET), 0)) {
+				xrecv(sock, greet, strlen(SERVER_GREET), 0)) {
 				closesocket(sock);
 				sock = INVALID_SOCKET;
 				continue;
@@ -215,6 +255,13 @@ static SOCKET server_connect(const char *host, unsigned short nport)
 
 			if (!strncmp(SERVER_GREET, greet, strlen(SERVER_GREET)))
 				break;
+		} else {
+#if defined(WIN32) || defined(_XBOX)
+			fprintf(stderr, "rocket: connect() failed: %d. last error: %d\n",
+					res, (int)WSAGetLastError());
+#else
+			fprintf(stderr, "rocket: connect() failed: %d\n", res);
+#endif
 		}
 
 		closesocket(sock);
@@ -287,6 +334,10 @@ void sync_destroy_device(struct sync_device *d)
 #ifndef SYNC_PLAYER
 	if (d->sock != INVALID_SOCKET)
 		closesocket(d->sock);
+#ifdef _XBOX
+	WSACleanup();
+	XNetCleanup();
+#endif
 #endif
 
 	for (i = 0; i < (int)d->num_tracks; ++i) {
@@ -345,6 +396,11 @@ static int create_leading_dirs(const char *path)
 		pos = strchr(pos, '/');
 		if (!pos)
 			break;
+#if defined(WIN32) || defined(_XBOX)
+		pos = strchr(pos, '\\');
+		if (!pos)
+			break;
+#endif
 		*pos = '\0';
 
 		/* does path exist, but isn't a dir? */
@@ -355,8 +411,11 @@ static int create_leading_dirs(const char *path)
 			if (mkdir(buf, 0777))
 				return -1;
 		}
-
+#if defined(WIN32) || defined(_XBOX)
+		*pos++ = '\\';
+#else
 		*pos++ = '/';
+#endif
 	}
 
 	return 0;
