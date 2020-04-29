@@ -6,35 +6,42 @@
 #include "track.h"
 #include "base.h"
 
-static double key_linear(const struct track_key k[2], double row)
+#if defined(_MSC_VER) && !defined(__clang__)
+#define SYNC_STATIC_ASSERT(expr) typedef char __static_assert_t[(expr) != 0]
+#else
+#define SYNC_STATIC_ASSERT(e) {enum { static_assert_value = 1/(!!(e)) };}
+#endif
+
+static float key_linear(const struct track_key k[2], float row)
 {
-	double t = (row - k[0].row) / (k[1].row - k[0].row);
+	float t = (row - k[0].row) / (k[1].row - k[0].row);
 	return k[0].value + (k[1].value - k[0].value) * t;
 }
 
-static double key_smooth(const struct track_key k[2], double row)
+static float key_smooth(const struct track_key k[2], float row)
 {
-	double t = (row - k[0].row) / (k[1].row - k[0].row);
+	float t = (row - k[0].row) / (k[1].row - k[0].row);
 	t = t * t * (3 - 2 * t);
 	return k[0].value + (k[1].value - k[0].value) * t;
 }
 
-static double key_ramp(const struct track_key k[2], double row)
+static float key_ramp(const struct track_key k[2], float row)
 {
-	double t = (row - k[0].row) / (k[1].row - k[0].row);
-	t = pow(t, 2.0);
+	float t = (row - k[0].row) / (k[1].row - k[0].row);
+	t *= t;
 	return k[0].value + (k[1].value - k[0].value) * t;
 }
 
-double sync_get_val(const struct sync_track *t, double row)
+float sync_get_val(const struct sync_track *t, float row)
 {
+	SYNC_STATIC_ASSERT(sizeof(int) == 4u);
 	int idx, irow;
 
 	/* If we have no keys at all, return a constant 0 */
 	if (!t->num_keys)
 		return 0.0f;
 
-	irow = (int)floor(row);
+	irow = (int)row;
 	idx = key_idx_floor(t, irow);
 
 	/* at the edges, return the first/last value */
